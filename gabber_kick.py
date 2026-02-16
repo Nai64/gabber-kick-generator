@@ -3,7 +3,7 @@ import wave
 import io
 import numpy as np
 import customtkinter as ctk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 from synth import generate_kick
 
@@ -75,6 +75,11 @@ class GabberKickApp(ctk.CTk):
         hint = ctk.CTkLabel(master=frame, text="Adjust sliders and press Preview. Then Save As... to export WAV.")
         hint.grid(row=9, column=0, columnspan=3, pady=(12, 0))
 
+        # Status label for feedback
+        self.status_var = ctk.StringVar(value="Ready")
+        status = ctk.CTkLabel(master=frame, textvariable=self.status_var, anchor="w")
+        status.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(8,0))
+
     def _render(self):
         params = dict(
             length_ms=self.length_var.get(),
@@ -93,15 +98,15 @@ class GabberKickApp(ctk.CTk):
         threading.Thread(target=self._play, daemon=True).start()
 
     def _play(self):
-        samples = self._render()
-        data = (samples * 32767).astype(np.int16)
-        if _HAS_SIMPLEAUDIO:
-            try:
+        try:
+            self.status_var.set("Rendering...")
+            samples = self._render()
+            data = (samples * 32767).astype(np.int16)
+            if _HAS_SIMPLEAUDIO:
+                self.status_var.set("Playing (simpleaudio)...")
                 sa.play_buffer(data.tobytes(), 1, 2, self.sample_rate)
-            except Exception:
-                pass
-        else:
-            try:
+            else:
+                self.status_var.set("Playing (winsound)...")
                 buf = io.BytesIO()
                 with wave.open(buf, 'wb') as wf:
                     wf.setnchannels(1)
@@ -109,6 +114,12 @@ class GabberKickApp(ctk.CTk):
                     wf.setframerate(self.sample_rate)
                     wf.writeframes(data.tobytes())
                 winsound.PlaySound(buf.getvalue(), winsound.SND_MEMORY | winsound.SND_ASYNC)
+            self.status_var.set("Playing (async)")
+        except Exception as e:
+            # show error so user can see why preview fails
+            self.status_var.set(f"Error: {e}")
+            try:
+                messagebox.showerror("Playback error", str(e))
             except Exception:
                 pass
 
@@ -116,13 +127,22 @@ class GabberKickApp(ctk.CTk):
         fn = filedialog.asksaveasfilename(defaultextension='.wav', filetypes=[('WAV files','*.wav')])
         if not fn:
             return
-        samples = self._render()
-        data = (samples * 32767).astype(np.int16)
-        with wave.open(fn, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(data.tobytes())
+        try:
+            self.status_var.set("Rendering for save...")
+            samples = self._render()
+            data = (samples * 32767).astype(np.int16)
+            with wave.open(fn, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(data.tobytes())
+            self.status_var.set(f"Saved: {fn}")
+        except Exception as e:
+            self.status_var.set(f"Save error: {e}")
+            try:
+                messagebox.showerror("Save error", str(e))
+            except Exception:
+                pass
 
 
 if __name__ == '__main__':
