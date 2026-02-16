@@ -1,6 +1,8 @@
 import threading
 import wave
 import io
+import tempfile
+import os
 import numpy as np
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -107,13 +109,37 @@ class GabberKickApp(ctk.CTk):
                 sa.play_buffer(data.tobytes(), 1, 2, self.sample_rate)
             else:
                 self.status_var.set("Playing (winsound)...")
-                buf = io.BytesIO()
-                with wave.open(buf, 'wb') as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(self.sample_rate)
-                    wf.writeframes(data.tobytes())
-                winsound.PlaySound(buf.getvalue(), winsound.SND_MEMORY | winsound.SND_ASYNC)
+                # write to a temporary WAV file because winsound can't play async from memory
+                tf = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+                tf_name = tf.name
+                try:
+                    tf.close()
+                    with wave.open(tf_name, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(self.sample_rate)
+                        wf.writeframes(data.tobytes())
+
+                    winsound.PlaySound(tf_name, winsound.SND_FILENAME | winsound.SND_ASYNC)
+
+                    # schedule deletion after playback duration + small buffer
+                    duration = len(samples) / float(self.sample_rate)
+                    def _cleanup(path):
+                        try:
+                            if os.path.exists(path):
+                                os.remove(path)
+                        except Exception:
+                            pass
+
+                    threading.Timer(duration + 1.5, _cleanup, args=(tf_name,)).start()
+                except Exception:
+                    # ensure temp file removed on error
+                    try:
+                        if os.path.exists(tf_name):
+                            os.remove(tf_name)
+                    except Exception:
+                        pass
+                    raise
             self.status_var.set("Playing (async)")
         except Exception as e:
             # show error so user can see why preview fails
